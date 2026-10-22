@@ -1,0 +1,102 @@
+services:
+  ydb-s1: &static-node
+    build: .
+    image: ydb-cluster:local
+    container_name: ydb-s1
+    hostname: ydb-s1
+    command: ["static"]
+    volumes:
+      - ./config.yaml:/tmp/config.yaml:ro
+      - ./cfg-s1:/opt/ydb/cfg
+      - ./data-s1:/ydb_data
+    ports:
+      - "8765:8765"    # Embedded UI узла s1
+    ulimits:
+      nofile: 65536
+    mem_limit: 4g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8765 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  ydb-s2:
+    <<: *static-node
+    container_name: ydb-s2
+    hostname: ydb-s2
+    volumes:
+      - ./config.yaml:/tmp/config.yaml:ro
+      - ./cfg-s2:/opt/ydb/cfg
+      - ./data-s2:/ydb_data
+    ports: ["8766:8765"]
+
+  ydb-s3:
+    <<: *static-node
+    container_name: ydb-s3
+    hostname: ydb-s3
+    volumes:
+      - ./config.yaml:/tmp/config.yaml:ro
+      - ./cfg-s3:/opt/ydb/cfg
+      - ./data-s3:/ydb_data
+    ports: ["8767:8765"]
+
+  ydb-db-1:
+    image: ydb-cluster:local
+    build: .
+    container_name: ydb-db-1
+    command: ["dynamic"]
+    volumes:
+      - ./config.yaml:/tmp/config.yaml:ro
+    ports:
+      - "2136:2136"    # gRPC для приложений
+      - "8768:8766"    # UI динамического узла
+    ulimits:
+      nofile: 65536
+    mem_limit: 3g
+    depends_on:
+      ydb-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ydb-db-2:
+    image: ydb-cluster:local
+    build: .
+    container_name: ydb-db-2
+    command: ["dynamic"]
+    volumes:
+      - ./config.yaml:/tmp/config.yaml:ro
+    ports:
+      - "8769:8766"
+    ulimits:
+      nofile: 65536
+    mem_limit: 3g
+    depends_on:
+      ydb-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ydb-init:  # разовая инициализация: bootstrap + создание базы
+    image: ydb-cluster:local
+    build: .
+    command:
+      - bash
+      - -ec
+      - |
+        echo "Ждём статические узлы..."
+        until curl -fsS http://ydb-s1:8765 >/dev/null 2>&1; do sleep 3; done
+        until curl -fsS http://ydb-s2:8765 >/dev/null 2>&1; do sleep 3; done
+        until curl -fsS http://ydb-s3:8765 >/dev/null 2>&1; do sleep 3; done
+        sleep 15  # даём времени сойтись группе хранения
+        if ydbd -s grpc://ydb-s1:2135 \
+          admin database /Root/testdb status >/dev/null 2>&1; then
+          echo "База /Root/testdb уже существует"
+        else
+          ydb -y -e grpc://ydb-s1:2135 \
+            admin cluster bootstrap --uuid 5c2a3958-a85c-4b3d-9c40-0d7d24b6e5ff
+          ydbd -s grpc://ydb-s1:2135 \
+            admin database /Root/testdb create ssd:1
+        fi
+        echo "Инициализация завершена"
+    depends_on: [ydb-s1, ydb-s2, ydb-s3]

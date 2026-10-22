@@ -1,0 +1,37 @@
+metadata:
+  kind: MainConfig
+  cluster: ""
+  version: 0
+
+config:
+  yaml_config_enabled: true
+  erasure: mirror-3-dc
+  fail_domain_type: disk
+  self_management_config:
+    enabled: true
+  default_disk_type: SSD
+
+  host_configs:
+    - host_config_id: 1
+      drive:
+        - path: /ydb_data/pdisk1.dat
+          type: SSD
+        - path: /ydb_data/pdisk2.dat
+          type: SSD
+        - path: /ydb_data/pdisk3.dat
+          type: SSD
+
+  hosts:
+    - host: ydb-s1
+      host_config_id: 1
+      location: { body: 1, data_center: 'zone-a', rack: '1' }
+    - host: ydb-s2
+      host_config_id: 1
+      location: { body: 2, data_center: 'zone-b', rack: '2' }
+    - host: ydb-s3
+      host_config_id: 1
+      location: { body: 3, data_center: 'zone-c', rack: '3' }
+
+  actor_system_config:
+    use_auto_config: true
+    cpu_count: 8
